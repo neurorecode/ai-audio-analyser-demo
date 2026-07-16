@@ -5,9 +5,34 @@ import AudioUploader from "@/components/AudioUploader";
 import Recorder from "@/components/Recorder";
 import Results from "@/components/Results";
 import { AnalysisResult } from "@/lib/types";
+import { requestTranscription } from "@/lib/transcribeClient";
 
 type Mode = "upload" | "record";
 type Stage = "idle" | "transcribing" | "analyzing" | "done" | "error";
+
+/**
+ * Reads a fetch Response, tolerating non-JSON bodies. Some errors (notably
+ * the platform's request-body size limit) come back as plain text rather than
+ * JSON, which would otherwise throw a cryptic "Unexpected token" error.
+ */
+async function readResponse(res: Response): Promise<{ error?: string; [k: string]: unknown }> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as { error?: string };
+  } catch {
+    if (res.status === 413) {
+      return {
+        error:
+          "This file is too large to upload to the server (the hosting platform caps uploads at ~4.5 MB). Please use a shorter or more compressed clip.",
+      };
+    }
+    return {
+      error:
+        text.slice(0, 200).trim() ||
+        `Request failed with status ${res.status}.`,
+    };
+  }
+}
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("upload");
@@ -32,16 +57,23 @@ export default function Home() {
     setError(null);
     setResult(null);
 
+    const MAX = 25 * 1024 * 1024;
+    if (file.size > MAX) {
+      setStage("error");
+      setError(
+        `This file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The maximum is 25 MB — please use a shorter or more compressed clip.`
+      );
+      return;
+    }
+
     // Step 1 — transcribe
     setStage("transcribing");
     let transcript = "";
     try {
-      const fd = new FormData();
-      fd.append("audio", file);
-      const res = await fetch("/api/transcribe", { method: "POST", body: fd });
-      const data = await res.json();
+      const res = await requestTranscription(file);
+      const data = await readResponse(res);
       if (!res.ok) throw new Error(data.error || "Transcription failed.");
-      transcript = data.transcript;
+      transcript = String(data.transcript ?? "");
     } catch (err) {
       setStage("error");
       setError(err instanceof Error ? err.message : "Transcription failed.");
@@ -56,9 +88,9 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript }),
       });
-      const data = await res.json();
+      const data = await readResponse(res);
       if (!res.ok) throw new Error(data.error || "Analysis failed.");
-      setResult({ transcript, ...data });
+      setResult({ transcript, ...(data as Omit<AnalysisResult, "transcript">) });
       setStage("done");
     } catch (err) {
       setStage("error");

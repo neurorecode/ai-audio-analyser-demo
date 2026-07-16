@@ -45,6 +45,13 @@ OPENAI_API_KEY=sk-...        # https://platform.openai.com/api-keys
 ANTHROPIC_API_KEY=sk-ant-... # https://console.anthropic.com/settings/keys
 ```
 
+To support files larger than ~4.5 MB (see [Large uploads](#-large-uploads)), also add a
+**Vercel Blob** token:
+
+```env
+BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
+```
+
 Optional overrides:
 
 ```env
@@ -116,11 +123,30 @@ Deploys cleanly to **Vercel** (or any Node host). Set `OPENAI_API_KEY` and
 
 ---
 
+## 📦 Large uploads
+
+Serverless hosts (Vercel) cap a request body sent to a function at **~4.5 MB**,
+but Whisper accepts up to **25 MB**. To bridge that gap the app uses
+**Vercel Blob**:
+
+- Files **≤ 4 MB** → uploaded directly to `/api/transcribe` (works locally with
+  no extra setup).
+- Files **> 4 MB** → uploaded straight to Vercel Blob from the browser, then the
+  server fetches the blob, transcribes it, and **deletes it immediately**.
+
+To enable large uploads, create a Blob store in your Vercel project (Storage →
+Blob). Vercel injects `BLOB_READ_WRITE_TOKEN` automatically; for local dev run
+`vercel env pull .env.local`. Without the token, files over 4 MB return a clear
+"not configured" message and smaller files still work.
+
 ## ⚠️ Notes & limits
 
-- Whisper caps uploads at **25 MB** — the app validates this and returns a clear error.
-- Audio is streamed to OpenAI and Anthropic for processing and is **not stored** by the app.
-- Microphone recording requires a **secure context** (HTTPS or `localhost`) and browser permission.
+- Whisper caps uploads at **25 MB** — the app validates this on both the client
+  and server and returns a clear error.
+- Audio is streamed to OpenAI and Anthropic for processing and is **not stored**
+  by the app (temporary blobs are deleted right after transcription).
+- Microphone recording requires a **secure context** (HTTPS or `localhost`) and
+  browser permission.
 
 ## 🛠️ Tech stack
 
